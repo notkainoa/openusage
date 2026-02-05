@@ -40,6 +40,15 @@ If you're interested in contributing to OpenUsage, you can clone this repo and s
 
 ## Install
 
+### Download
+
+| Platform | Download |
+|----------|----------|
+| macOS (Apple Silicon) | [**Download .dmg**](https://github.com/notkainoa/openusage/releases/latest/download/OpenUsage_aarch64.dmg) |
+| macOS (Intel) | [**Download .dmg**](https://github.com/notkainoa/openusage/releases/latest/download/OpenUsage_x86_64.dmg) |
+
+> **Note**: The app is signed and notarized. After opening, right-click the app in Finder and select "Open" if macOS shows a security warning.
+
 ### From Source
 
 ```bash
