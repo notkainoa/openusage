@@ -27,6 +27,7 @@ import {
   loadAutoUpdateInterval,
   loadDisplayMode,
   loadPluginSettings,
+  loadZaiApiKey,
   loadTrayShowPercentage,
   loadTrayIconStyle,
   loadThemeMode,
@@ -34,6 +35,7 @@ import {
   saveAutoUpdateInterval,
   saveDisplayMode,
   savePluginSettings,
+  saveZaiApiKey,
   saveTrayShowPercentage,
   saveTrayIconStyle,
   saveThemeMode,
@@ -75,6 +77,7 @@ function App() {
   const [displayMode, setDisplayMode] = useState<DisplayMode>(DEFAULT_DISPLAY_MODE)
   const [trayIconStyle, setTrayIconStyle] = useState<TrayIconStyle>(DEFAULT_TRAY_ICON_STYLE)
   const [trayShowPercentage, setTrayShowPercentage] = useState(DEFAULT_TRAY_SHOW_PERCENTAGE)
+  const [zaiApiKey, setZaiApiKey] = useState("")
   const [maxPanelHeightPx, setMaxPanelHeightPx] = useState<number | null>(null)
   const maxPanelHeightPxRef = useRef<number | null>(null)
   const [appVersion, setAppVersion] = useState("...")
@@ -510,6 +513,13 @@ function App() {
           console.error("Failed to load tray show percentage:", error)
         }
 
+        let storedZaiApiKey = ""
+        try {
+          storedZaiApiKey = await loadZaiApiKey()
+        } catch (error) {
+          console.error("Failed to load z.ai api key:", error)
+        }
+
         const normalizedTrayShowPercentage = isTrayPercentageMandatory(storedTrayIconStyle)
           ? true
           : storedTrayShowPercentage
@@ -521,6 +531,7 @@ function App() {
           setDisplayMode(storedDisplayMode)
           setTrayIconStyle(storedTrayIconStyle)
           setTrayShowPercentage(normalizedTrayShowPercentage)
+          setZaiApiKey(storedZaiApiKey)
           const enabledIds = getEnabledPluginIds(normalized)
           setLoadingForPlugins(enabledIds)
           try {
@@ -696,6 +707,28 @@ function App() {
     })
   }, [pluginSettings])
 
+  const handleZaiApiKeyChange = useCallback((value: string) => {
+    setZaiApiKey(value)
+    void (async () => {
+      try {
+        await saveZaiApiKey(value)
+      } catch (error) {
+        console.error("Failed to save z.ai api key:", error)
+      }
+
+      if (!pluginSettings) return
+      if (pluginSettings.disabled.includes("zai")) return
+
+      setLoadingForPlugins(["zai"])
+      try {
+        await startBatch(["zai"])
+      } catch (error) {
+        console.error("Failed to refresh z.ai after api key change:", error)
+        setErrorForPlugins(["zai"], "Failed to start probe")
+      }
+    })()
+  }, [pluginSettings, setErrorForPlugins, setLoadingForPlugins, startBatch])
+
   const settingsPlugins = useMemo(() => {
     if (!pluginSettings) return []
     const pluginMap = new Map(pluginsMeta.map((plugin) => [plugin.id, plugin]))
@@ -809,6 +842,8 @@ function App() {
           onTrayIconStyleChange={handleTrayIconStyleChange}
           trayShowPercentage={trayShowPercentage}
           onTrayShowPercentageChange={handleTrayShowPercentageChange}
+          zaiApiKey={zaiApiKey}
+          onZaiApiKeyChange={handleZaiApiKeyChange}
           providerIconUrl={navPlugins[0]?.iconUrl}
         />
       )

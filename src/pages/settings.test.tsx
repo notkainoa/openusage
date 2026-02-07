@@ -1,5 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react"
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -57,6 +57,8 @@ const defaultProps = {
   onTrayIconStyleChange: vi.fn(),
   trayShowPercentage: false,
   onTrayShowPercentageChange: vi.fn(),
+  zaiApiKey: "",
+  onZaiApiKeyChange: vi.fn(),
 }
 
 afterEach(() => {
@@ -138,6 +140,35 @@ describe("SettingsPage", () => {
     expect(screen.getByText("System")).toBeInTheDocument()
     expect(screen.getByText("Light")).toBeInTheDocument()
     expect(screen.getByText("Dark")).toBeInTheDocument()
+  })
+
+  it("renders z.ai api key input", () => {
+    render(<SettingsPage {...defaultProps} />)
+    expect(screen.getByText("Z.AI")).toBeInTheDocument()
+    expect(screen.getByLabelText("API key")).toBeInTheDocument()
+  })
+
+  it("updates z.ai api key", async () => {
+    const onZaiApiKeyChange = vi.fn()
+    function Harness() {
+      const [value, setValue] = useState("")
+      return (
+        <SettingsPage
+          {...defaultProps}
+          zaiApiKey={value}
+          onZaiApiKeyChange={(next) => {
+            onZaiApiKeyChange(next)
+            setValue(next)
+          }}
+        />
+      )
+    }
+
+    render(<Harness />)
+    const input = screen.getByLabelText("API key")
+    await userEvent.type(input, "abc")
+    expect(input).toHaveValue("abc")
+    expect(onZaiApiKeyChange).toHaveBeenLastCalledWith("abc")
   })
 
   it("updates theme mode", async () => {

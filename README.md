@@ -29,6 +29,7 @@ OpenUsage lives in your menu bar and shows you how much of your AI coding subscr
 - [**Copilot**](docs/providers/copilot.md) / premium, chat, completions
 - [**Cursor**](docs/providers/cursor.md) / credits, plan usage, on-demand
 - [**Windsurf**](docs/providers/windsurf.md) / prompt credits, flex credits
+- [**Z.AI**](docs/providers/zai.md) / tokens, MCP
 
 ### Maybe Soon
 

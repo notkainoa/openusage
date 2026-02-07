@@ -21,6 +21,8 @@ const state = vi.hoisted(() => ({
   saveTrayIconStyleMock: vi.fn(),
   loadTrayShowPercentageMock: vi.fn(),
   saveTrayShowPercentageMock: vi.fn(),
+  loadZaiApiKeyMock: vi.fn(),
+  saveZaiApiKeyMock: vi.fn(),
   renderTrayBarsIconMock: vi.fn(),
   probeHandlers: null as null | { onResult: (output: any) => void; onBatchComplete: () => void },
   trayGetByIdMock: vi.fn(),
@@ -157,6 +159,8 @@ vi.mock("@/lib/settings", async () => {
     saveTrayIconStyle: state.saveTrayIconStyleMock,
     loadTrayShowPercentage: state.loadTrayShowPercentageMock,
     saveTrayShowPercentage: state.saveTrayShowPercentageMock,
+    loadZaiApiKey: state.loadZaiApiKeyMock,
+    saveZaiApiKey: state.saveZaiApiKeyMock,
   }
 })
 
@@ -183,6 +187,8 @@ describe("App", () => {
     state.saveTrayIconStyleMock.mockReset()
     state.loadTrayShowPercentageMock.mockReset()
     state.saveTrayShowPercentageMock.mockReset()
+    state.loadZaiApiKeyMock.mockReset()
+    state.saveZaiApiKeyMock.mockReset()
     state.renderTrayBarsIconMock.mockReset()
     state.trayGetByIdMock.mockReset()
     state.traySetIconMock.mockReset()
@@ -203,6 +209,8 @@ describe("App", () => {
     state.saveTrayIconStyleMock.mockResolvedValue(undefined)
     state.loadTrayShowPercentageMock.mockResolvedValue(false)
     state.saveTrayShowPercentageMock.mockResolvedValue(undefined)
+    state.loadZaiApiKeyMock.mockResolvedValue("")
+    state.saveZaiApiKeyMock.mockResolvedValue(undefined)
     state.renderTrayBarsIconMock.mockResolvedValue({})
     Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
       configurable: true,
@@ -630,6 +638,27 @@ describe("App", () => {
     await userEvent.click(settingsButtons[0])
     await userEvent.click(await screen.findByRole("radio", { name: "30 min" }))
     expect(state.saveAutoUpdateIntervalMock).toHaveBeenCalledWith(30)
+  })
+
+  it("saves z.ai api key and reprobes z.ai when enabled", async () => {
+    state.invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_plugins") {
+        return [{ id: "zai", name: "Z.AI", iconUrl: "icon-z", primaryProgressLabel: null, lines: [] }]
+      }
+      return null
+    })
+    state.loadPluginSettingsMock.mockResolvedValueOnce({ order: ["zai"], disabled: [] })
+
+    render(<App />)
+    await waitFor(() => expect(state.startBatchMock).toHaveBeenCalledWith(["zai"]))
+    state.startBatchMock.mockClear()
+
+    const settingsButtons = await screen.findAllByRole("button", { name: "Settings" })
+    await userEvent.click(settingsButtons[0])
+    await userEvent.type(await screen.findByLabelText("API key"), "abc")
+
+    await waitFor(() => expect(state.saveZaiApiKeyMock).toHaveBeenCalled())
+    await waitFor(() => expect(state.startBatchMock).toHaveBeenCalledWith(["zai"]))
   })
 
   it("logs when saving auto-update interval fails", async () => {

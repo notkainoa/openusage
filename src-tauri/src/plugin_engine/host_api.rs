@@ -1,7 +1,13 @@
 use rquickjs::{Ctx, Exception, Function, Object};
 use std::path::PathBuf;
 
-const WHITELISTED_ENV_VARS: [&str; 1] = ["CODEX_HOME"];
+const WHITELISTED_ENV_VARS: [&str; 5] = [
+    "CODEX_HOME",
+    "Z_AI_API_KEY",
+    "Z_AI_API_HOST",
+    "Z_AI_QUOTA_URL",
+    "ZAI_API_REGION",
+];
 
 /// Redact sensitive value to first4...last4 format (UTF-8 safe)
 fn redact_value(value: &str) -> String {

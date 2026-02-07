@@ -14,6 +14,7 @@ import {
   loadTrayIconStyle,
   loadTrayShowPercentage,
   loadThemeMode,
+  loadZaiApiKey,
   normalizePluginSettings,
   saveAutoUpdateInterval,
   saveDisplayMode,
@@ -21,6 +22,7 @@ import {
   saveTrayIconStyle,
   saveTrayShowPercentage,
   saveThemeMode,
+  saveZaiApiKey,
 } from "@/lib/settings"
 import type { PluginMeta } from "@/lib/plugin-types"
 
@@ -194,5 +196,24 @@ describe("settings", () => {
   it("falls back to default for invalid tray show percentage", async () => {
     storeState.set("trayShowPercentage", "invalid")
     await expect(loadTrayShowPercentage()).resolves.toBe(DEFAULT_TRAY_SHOW_PERCENTAGE)
+  })
+
+  it("loads default z.ai api key when missing", async () => {
+    await expect(loadZaiApiKey()).resolves.toBe("")
+  })
+
+  it("loads stored z.ai api key", async () => {
+    storeState.set("zaiApiKey", "  zai-token  ")
+    await expect(loadZaiApiKey()).resolves.toBe("zai-token")
+  })
+
+  it("saves trimmed z.ai api key", async () => {
+    await saveZaiApiKey("  token-1  ")
+    await expect(loadZaiApiKey()).resolves.toBe("token-1")
+  })
+
+  it("clears z.ai api key when blank", async () => {
+    await saveZaiApiKey("  ")
+    await expect(loadZaiApiKey()).resolves.toBe("")
   })
 })

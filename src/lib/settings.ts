@@ -25,6 +25,7 @@ const THEME_MODE_KEY = "themeMode";
 const DISPLAY_MODE_KEY = "displayMode";
 const TRAY_ICON_STYLE_KEY = "trayIconStyle";
 const TRAY_SHOW_PERCENTAGE_KEY = "trayShowPercentage";
+const ZAI_API_KEY_KEY = "zaiApiKey";
 
 export const DEFAULT_AUTO_UPDATE_INTERVAL: AutoUpdateIntervalMinutes = 15;
 export const DEFAULT_THEME_MODE: ThemeMode = "system";
@@ -211,6 +212,18 @@ export async function loadTrayShowPercentage(): Promise<boolean> {
 
 export async function saveTrayShowPercentage(value: boolean): Promise<void> {
   await store.set(TRAY_SHOW_PERCENTAGE_KEY, value);
+  await store.save();
+}
+
+export async function loadZaiApiKey(): Promise<string> {
+  const stored = await store.get<unknown>(ZAI_API_KEY_KEY);
+  if (typeof stored !== "string") return "";
+  return stored.trim();
+}
+
+export async function saveZaiApiKey(value: string): Promise<void> {
+  const normalized = value.trim();
+  await store.set(ZAI_API_KEY_KEY, normalized ? normalized : null);
   await store.save();
 }
 

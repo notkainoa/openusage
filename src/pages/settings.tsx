@@ -269,6 +269,8 @@ interface SettingsPageProps {
   onTrayIconStyleChange: (value: TrayIconStyle) => void;
   trayShowPercentage: boolean;
   onTrayShowPercentageChange: (value: boolean) => void;
+  zaiApiKey: string;
+  onZaiApiKeyChange: (value: string) => void;
   providerIconUrl?: string;
 }
 
@@ -286,6 +288,8 @@ export function SettingsPage({
   onTrayIconStyleChange,
   trayShowPercentage,
   onTrayShowPercentageChange,
+  zaiApiKey,
+  onZaiApiKeyChange,
   providerIconUrl,
 }: SettingsPageProps) {
   const percentageMandatory = isTrayPercentageMandatory(trayIconStyle);
@@ -444,6 +448,31 @@ export function SettingsPage({
               );
             })}
           </div>
+        </div>
+      </section>
+      <section>
+        <h3 className="text-lg font-semibold mb-0">Z.AI</h3>
+        <p className="text-sm text-muted-foreground mb-2">
+          Paste key here, or auto-detect from ~/.claude/settings.json
+        </p>
+        <div className="bg-muted/50 rounded-lg p-3 space-y-2">
+          <label htmlFor="zai-api-key" className="text-sm font-medium text-foreground">
+            API key
+          </label>
+          <input
+            id="zai-api-key"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={zaiApiKey}
+            onChange={(event) => onZaiApiKeyChange(event.target.value)}
+            placeholder="zai_..."
+            className={cn(
+              "w-full rounded-md border bg-background px-3 py-2 text-sm",
+              "border-input text-foreground placeholder:text-muted-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            )}
+          />
         </div>
       </section>
       <section>
