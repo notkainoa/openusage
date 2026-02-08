@@ -5,7 +5,7 @@
   "version": "0.0.1",
   "entry": "plugin.js",
   "icon": "icon.svg",
-  "brandColor": "#E85A6A",
+  "brandColor": "#FFFFFF",
   "lines": [
     { "type": "progress", "label": "Tokens", "scope": "overview", "primaryOrder": 1 },
     { "type": "progress", "label": "MCP", "scope": "overview" }

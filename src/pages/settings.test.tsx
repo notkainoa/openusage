@@ -142,9 +142,20 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Dark")).toBeInTheDocument()
   })
 
-  it("renders z.ai api key input", () => {
+  it("hides z.ai api key input when zai plugin is not enabled", () => {
     render(<SettingsPage {...defaultProps} />)
-    expect(screen.getByText("Z.AI")).toBeInTheDocument()
+    expect(screen.queryByText("Z.AI")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("API key")).not.toBeInTheDocument()
+  })
+
+  it("renders z.ai api key input when zai plugin is enabled", () => {
+    render(
+      <SettingsPage
+        {...defaultProps}
+        plugins={[{ id: "zai", name: "Z.AI", enabled: true }]}
+      />
+    )
+    expect(screen.getByRole("heading", { name: "Z.AI" })).toBeInTheDocument()
     expect(screen.getByLabelText("API key")).toBeInTheDocument()
   })
 
@@ -155,6 +166,7 @@ describe("SettingsPage", () => {
       return (
         <SettingsPage
           {...defaultProps}
+          plugins={[{ id: "zai", name: "Z.AI", enabled: true }]}
           zaiApiKey={value}
           onZaiApiKeyChange={(next) => {
             onZaiApiKeyChange(next)
