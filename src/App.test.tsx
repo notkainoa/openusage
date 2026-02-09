@@ -640,7 +640,7 @@ describe("App", () => {
     expect(state.saveAutoUpdateIntervalMock).toHaveBeenCalledWith(30)
   })
 
-  it("saves z.ai api key and reprobes z.ai when enabled", async () => {
+  it("debounces z.ai api key checks and shows success feedback", async () => {
     state.invokeMock.mockImplementation(async (cmd: string) => {
       if (cmd === "list_plugins") {
         return [{ id: "zai", name: "Z.AI", iconUrl: "icon-z", primaryProgressLabel: null, lines: [] }]
@@ -659,6 +659,45 @@ describe("App", () => {
 
     await waitFor(() => expect(state.saveZaiApiKeyMock).toHaveBeenCalled())
     await waitFor(() => expect(state.startBatchMock).toHaveBeenCalledWith(["zai"]))
+    expect(state.startBatchMock).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Checking API key..."))
+
+    state.probeHandlers?.onResult({
+      providerId: "zai",
+      displayName: "Z.AI",
+      iconUrl: "icon-z",
+      lines: [{ type: "text", label: "Plan", value: "Pro" }],
+    })
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("API key verified."))
+  })
+
+  it("shows z.ai key-check error feedback when probe returns an error", async () => {
+    state.invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_plugins") {
+        return [{ id: "zai", name: "Z.AI", iconUrl: "icon-z", primaryProgressLabel: null, lines: [] }]
+      }
+      return null
+    })
+    state.loadPluginSettingsMock.mockResolvedValueOnce({ order: ["zai"], disabled: [] })
+
+    render(<App />)
+    await waitFor(() => expect(state.startBatchMock).toHaveBeenCalledWith(["zai"]))
+    state.startBatchMock.mockClear()
+
+    const settingsButtons = await screen.findAllByRole("button", { name: "Settings" })
+    await userEvent.click(settingsButtons[0])
+    await userEvent.type(await screen.findByLabelText("API key"), "bad")
+
+    await waitFor(() => expect(state.startBatchMock).toHaveBeenCalledWith(["zai"]))
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Checking API key..."))
+
+    state.probeHandlers?.onResult({
+      providerId: "zai",
+      displayName: "Z.AI",
+      iconUrl: "icon-z",
+      lines: [{ type: "badge", label: "Error", text: "Token invalid." }],
+    })
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Token invalid."))
   })
 
   it("logs when saving auto-update interval fails", async () => {

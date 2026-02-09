@@ -52,12 +52,19 @@ const MAX_HEIGHT_FRACTION_OF_MONITOR = 0.8;
 const ARROW_OVERHEAD_PX = 37; // .tray-arrow (7px) + wrapper pt-1.5 (6px) + bottom p-6 (24px)
 const TRAY_SETTINGS_DEBOUNCE_MS = 2000;
 const TRAY_PROBE_DEBOUNCE_MS = 500;
+const ZAI_API_KEY_CHECK_DEBOUNCE_MS = 300;
+const ZAI_API_KEY_CHECK_TIMEOUT_MS = 15_000;
 
 type PluginState = {
   data: PluginOutput | null
   loading: boolean
   error: string | null
   lastManualRefreshAt: number | null
+}
+
+type ZaiApiKeyValidation = {
+  status: "idle" | "checking" | "success" | "error"
+  message: string | null
 }
 
 function App() {
@@ -78,6 +85,10 @@ function App() {
   const [trayIconStyle, setTrayIconStyle] = useState<TrayIconStyle>(DEFAULT_TRAY_ICON_STYLE)
   const [trayShowPercentage, setTrayShowPercentage] = useState(DEFAULT_TRAY_SHOW_PERCENTAGE)
   const [zaiApiKey, setZaiApiKey] = useState("")
+  const [zaiApiKeyValidation, setZaiApiKeyValidation] = useState<ZaiApiKeyValidation>({
+    status: "idle",
+    message: null,
+  })
   const [maxPanelHeightPx, setMaxPanelHeightPx] = useState<number | null>(null)
   const maxPanelHeightPxRef = useRef<number | null>(null)
   const [appVersion, setAppVersion] = useState("...")
@@ -89,6 +100,10 @@ function App() {
   const trayGaugeIconPathRef = useRef<string | null>(null)
   const trayUpdateTimerRef = useRef<number | null>(null)
   const trayUpdatePendingRef = useRef(false)
+  const zaiApiKeyDebounceTimerRef = useRef<number | null>(null)
+  const zaiApiKeyTimeoutTimerRef = useRef<number | null>(null)
+  const zaiApiKeyRequestIdRef = useRef(0)
+  const zaiApiKeyPendingRequestIdRef = useRef<number | null>(null)
   const [trayReady, setTrayReady] = useState(false)
 
   // Store state in refs so scheduleTrayIconUpdate can read current values without recreating the callback
@@ -109,6 +124,28 @@ function App() {
   useEffect(() => {
     getVersion().then(setAppVersion)
   }, [])
+
+  const clearZaiApiKeyCheckDebounce = useCallback(() => {
+    if (zaiApiKeyDebounceTimerRef.current !== null) {
+      window.clearTimeout(zaiApiKeyDebounceTimerRef.current)
+      zaiApiKeyDebounceTimerRef.current = null
+    }
+  }, [])
+
+  const clearZaiApiKeyCheckTimeout = useCallback(() => {
+    if (zaiApiKeyTimeoutTimerRef.current !== null) {
+      window.clearTimeout(zaiApiKeyTimeoutTimerRef.current)
+      zaiApiKeyTimeoutTimerRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      clearZaiApiKeyCheckDebounce()
+      clearZaiApiKeyCheckTimeout()
+      zaiApiKeyPendingRequestIdRef.current = null
+    }
+  }, [clearZaiApiKeyCheckDebounce, clearZaiApiKeyCheckTimeout])
 
   // Stable callback that reads from refs - never recreated, so debounce works correctly
   const scheduleTrayIconUpdate = useCallback((_reason: "probe" | "settings" | "init", delayMs = 0) => {
@@ -446,10 +483,29 @@ function App() {
         },
       }))
 
+      if (output.providerId === "zai") {
+        const pendingRequestId = zaiApiKeyPendingRequestIdRef.current
+        if (pendingRequestId !== null && pendingRequestId === zaiApiKeyRequestIdRef.current) {
+          zaiApiKeyPendingRequestIdRef.current = null
+          clearZaiApiKeyCheckTimeout()
+          if (errorMessage) {
+            setZaiApiKeyValidation({
+              status: "error",
+              message: errorMessage,
+            })
+          } else {
+            setZaiApiKeyValidation({
+              status: "success",
+              message: "API key verified.",
+            })
+          }
+        }
+      }
+
       // Regenerate tray icon on every probe result (debounced to avoid churn).
       scheduleTrayIconUpdate("probe", TRAY_PROBE_DEBOUNCE_MS)
     },
-    [getErrorMessage, scheduleTrayIconUpdate]
+    [clearZaiApiKeyCheckTimeout, getErrorMessage, scheduleTrayIconUpdate]
   )
 
   const handleBatchComplete = useCallback(() => {}, [])
@@ -595,6 +651,19 @@ function App() {
     startBatch,
   ])
 
+  useEffect(() => {
+    if (!pluginSettings || pluginSettings.disabled.includes("zai")) {
+      clearZaiApiKeyCheckDebounce()
+      clearZaiApiKeyCheckTimeout()
+      zaiApiKeyPendingRequestIdRef.current = null
+      setZaiApiKeyValidation((prev) =>
+        prev.status === "idle" && prev.message === null
+          ? prev
+          : { status: "idle", message: null }
+      )
+    }
+  }, [pluginSettings, clearZaiApiKeyCheckDebounce, clearZaiApiKeyCheckTimeout])
+
   // Apply theme mode to document
   useEffect(() => {
     const root = document.documentElement
@@ -709,25 +778,75 @@ function App() {
 
   const handleZaiApiKeyChange = useCallback((value: string) => {
     setZaiApiKey(value)
-    void (async () => {
-      try {
-        await saveZaiApiKey(value)
-      } catch (error) {
-        console.error("Failed to save z.ai api key:", error)
-      }
+    setZaiApiKeyValidation({ status: "idle", message: null })
+    clearZaiApiKeyCheckDebounce()
+    clearZaiApiKeyCheckTimeout()
+    zaiApiKeyPendingRequestIdRef.current = null
 
-      if (!pluginSettings) return
-      if (pluginSettings.disabled.includes("zai")) return
+    const requestId = zaiApiKeyRequestIdRef.current + 1
+    zaiApiKeyRequestIdRef.current = requestId
 
-      setLoadingForPlugins(["zai"])
-      try {
-        await startBatch(["zai"])
-      } catch (error) {
-        console.error("Failed to refresh z.ai after api key change:", error)
-        setErrorForPlugins(["zai"], "Failed to start probe")
-      }
-    })()
-  }, [pluginSettings, setErrorForPlugins, setLoadingForPlugins, startBatch])
+    zaiApiKeyDebounceTimerRef.current = window.setTimeout(() => {
+      void (async () => {
+        try {
+          await saveZaiApiKey(value)
+        } catch (error) {
+          if (requestId !== zaiApiKeyRequestIdRef.current) return
+          console.error("Failed to save z.ai api key:", error)
+          setZaiApiKeyValidation({
+            status: "error",
+            message: "Failed to save API key. Try again.",
+          })
+          return
+        }
+
+        if (requestId !== zaiApiKeyRequestIdRef.current) return
+        const latestPluginSettings = pluginSettingsRef.current
+        if (!latestPluginSettings || latestPluginSettings.disabled.includes("zai")) {
+          setZaiApiKeyValidation({ status: "idle", message: null })
+          return
+        }
+
+        setZaiApiKeyValidation({
+          status: "checking",
+          message: "Checking API key...",
+        })
+        zaiApiKeyPendingRequestIdRef.current = requestId
+        clearZaiApiKeyCheckTimeout()
+        zaiApiKeyTimeoutTimerRef.current = window.setTimeout(() => {
+          if (requestId !== zaiApiKeyRequestIdRef.current) return
+          if (zaiApiKeyPendingRequestIdRef.current !== requestId) return
+          zaiApiKeyPendingRequestIdRef.current = null
+          setZaiApiKeyValidation({
+            status: "error",
+            message: "API key check timed out. Try again.",
+          })
+          setErrorForPlugins(["zai"], "API key check timed out. Try again.")
+        }, ZAI_API_KEY_CHECK_TIMEOUT_MS)
+
+        setLoadingForPlugins(["zai"])
+        try {
+          await startBatch(["zai"])
+        } catch (error) {
+          if (requestId !== zaiApiKeyRequestIdRef.current) return
+          console.error("Failed to refresh z.ai after api key change:", error)
+          zaiApiKeyPendingRequestIdRef.current = null
+          clearZaiApiKeyCheckTimeout()
+          setZaiApiKeyValidation({
+            status: "error",
+            message: "Failed to start API key check. Try again.",
+          })
+          setErrorForPlugins(["zai"], "Failed to start probe")
+        }
+      })()
+    }, ZAI_API_KEY_CHECK_DEBOUNCE_MS)
+  }, [
+    clearZaiApiKeyCheckDebounce,
+    clearZaiApiKeyCheckTimeout,
+    setErrorForPlugins,
+    setLoadingForPlugins,
+    startBatch,
+  ])
 
   const settingsPlugins = useMemo(() => {
     if (!pluginSettings) return []
@@ -843,6 +962,8 @@ function App() {
           trayShowPercentage={trayShowPercentage}
           onTrayShowPercentageChange={handleTrayShowPercentageChange}
           zaiApiKey={zaiApiKey}
+          zaiApiKeyStatus={zaiApiKeyValidation.status}
+          zaiApiKeyMessage={zaiApiKeyValidation.message}
           onZaiApiKeyChange={handleZaiApiKeyChange}
           providerIconUrl={navPlugins[0]?.iconUrl}
         />

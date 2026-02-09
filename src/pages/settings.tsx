@@ -15,7 +15,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical } from "lucide-react";
+import { Check, GripVertical, RefreshCw, X } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import {
@@ -270,6 +270,8 @@ interface SettingsPageProps {
   trayShowPercentage: boolean;
   onTrayShowPercentageChange: (value: boolean) => void;
   zaiApiKey: string;
+  zaiApiKeyStatus: "idle" | "checking" | "success" | "error";
+  zaiApiKeyMessage: string | null;
   onZaiApiKeyChange: (value: string) => void;
   providerIconUrl?: string;
 }
@@ -289,6 +291,8 @@ export function SettingsPage({
   trayShowPercentage,
   onTrayShowPercentageChange,
   zaiApiKey,
+  zaiApiKeyStatus,
+  zaiApiKeyMessage,
   onZaiApiKeyChange,
   providerIconUrl,
 }: SettingsPageProps) {
@@ -297,6 +301,15 @@ export function SettingsPage({
     ? true
     : trayShowPercentage;
   const zaiEnabled = plugins.some((plugin) => plugin.id === "zai" && plugin.enabled);
+  const zaiStatusText = zaiApiKeyMessage
+    ? zaiApiKeyMessage
+    : zaiApiKeyStatus === "checking"
+      ? "Checking API key..."
+      : zaiApiKeyStatus === "success"
+        ? "API key verified."
+        : zaiApiKeyStatus === "error"
+          ? "API key check failed. Try again."
+          : null;
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -481,7 +494,7 @@ export function SettingsPage({
         <section>
           <h3 className="text-lg font-semibold mb-0">Z.AI</h3>
           <p className="text-sm text-muted-foreground mb-2">
-            Paste key here, or auto-detect from ~/.claude/settings.json
+            Paste your Z.AI API key here.
           </p>
           <div className="bg-muted/50 rounded-lg p-3 space-y-2">
             <label htmlFor="zai-api-key" className="text-sm font-medium text-foreground">
@@ -501,6 +514,36 @@ export function SettingsPage({
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               )}
             />
+            {zaiApiKeyStatus !== "idle" ? (
+              <p
+                role={zaiApiKeyStatus === "error" ? "alert" : "status"}
+                aria-live="polite"
+                className={cn(
+                  "flex items-center gap-2 text-xs",
+                  zaiApiKeyStatus === "checking" && "text-muted-foreground",
+                  zaiApiKeyStatus === "success" && "text-emerald-600 dark:text-emerald-400",
+                  zaiApiKeyStatus === "error" && "text-destructive"
+                )}
+              >
+                <span
+                  className={cn(
+                    "inline-flex h-4 w-4 items-center justify-center rounded-full border",
+                    zaiApiKeyStatus === "checking" && "border-muted-foreground/50",
+                    zaiApiKeyStatus === "success" && "border-emerald-500/70",
+                    zaiApiKeyStatus === "error" && "border-destructive/70"
+                  )}
+                >
+                  {zaiApiKeyStatus === "checking" ? (
+                    <RefreshCw className="h-3 w-3 animate-spin" />
+                  ) : zaiApiKeyStatus === "success" ? (
+                    <Check className="h-3 w-3" />
+                  ) : (
+                    <X className="h-3 w-3" />
+                  )}
+                </span>
+                <span>{zaiStatusText}</span>
+              </p>
+            ) : null}
           </div>
         </section>
       ) : null}

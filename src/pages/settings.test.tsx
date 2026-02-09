@@ -58,6 +58,8 @@ const defaultProps = {
   trayShowPercentage: false,
   onTrayShowPercentageChange: vi.fn(),
   zaiApiKey: "",
+  zaiApiKeyStatus: "idle" as const,
+  zaiApiKeyMessage: null,
   onZaiApiKeyChange: vi.fn(),
 }
 
@@ -181,6 +183,40 @@ describe("SettingsPage", () => {
     await userEvent.type(input, "abc")
     expect(input).toHaveValue("abc")
     expect(onZaiApiKeyChange).toHaveBeenLastCalledWith("abc")
+  })
+
+  it("shows z.ai checking feedback", () => {
+    render(
+      <SettingsPage
+        {...defaultProps}
+        plugins={[{ id: "zai", name: "Z.AI", enabled: true }]}
+        zaiApiKeyStatus="checking"
+      />
+    )
+    expect(screen.getByRole("status")).toHaveTextContent("Checking API key...")
+  })
+
+  it("shows z.ai success feedback", () => {
+    render(
+      <SettingsPage
+        {...defaultProps}
+        plugins={[{ id: "zai", name: "Z.AI", enabled: true }]}
+        zaiApiKeyStatus="success"
+      />
+    )
+    expect(screen.getByRole("status")).toHaveTextContent("API key verified.")
+  })
+
+  it("shows z.ai error feedback", () => {
+    render(
+      <SettingsPage
+        {...defaultProps}
+        plugins={[{ id: "zai", name: "Z.AI", enabled: true }]}
+        zaiApiKeyStatus="error"
+        zaiApiKeyMessage="Token invalid."
+      />
+    )
+    expect(screen.getByRole("alert")).toHaveTextContent("Token invalid.")
   })
 
   it("updates theme mode", async () => {

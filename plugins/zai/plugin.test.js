@@ -6,6 +6,13 @@ const loadPlugin = async () => {
   return globalThis.__openusage_plugin
 }
 
+const setStoredApiKey = (ctx, apiKey = "zai-token") => {
+  ctx.host.fs.writeText(
+    "/tmp/openusage-test/settings.json",
+    JSON.stringify({ zaiApiKey: apiKey })
+  )
+}
+
 const makeQuotaResponse = (overrides = {}) =>
   JSON.stringify({
     code: 200,
@@ -44,15 +51,53 @@ describe("zai plugin", () => {
     vi.resetModules()
   })
 
-  it("throws when token is missing", async () => {
+  it("throws when API key is missing from OpenUsage settings", async () => {
     const ctx = makeCtx()
     const plugin = await loadPlugin()
-    expect(() => plugin.probe(ctx)).toThrow("Missing API token")
+    expect(() => plugin.probe(ctx)).toThrow(
+      "Missing API token. Set Z.AI API key in OpenUsage Settings."
+    )
+  })
+
+  it("ignores Claude settings token detection", async () => {
+    const ctx = makeCtx()
+    ctx.host.fs.writeText(
+      "~/.claude/settings.json",
+      JSON.stringify({ env: { Z_AI_API_KEY: "claude-token" } })
+    )
+
+    const plugin = await loadPlugin()
+    expect(() => plugin.probe(ctx)).toThrow(
+      "Missing API token. Set Z.AI API key in OpenUsage Settings."
+    )
+  })
+
+  it("ignores Z_AI_API_KEY environment variable detection", async () => {
+    const ctx = makeCtx()
+    ctx.host.env.get.mockImplementation((name) => (name === "Z_AI_API_KEY" ? "env-token" : null))
+
+    const plugin = await loadPlugin()
+    expect(() => plugin.probe(ctx)).toThrow(
+      "Missing API token. Set Z.AI API key in OpenUsage Settings."
+    )
+  })
+
+  it("uses token from OpenUsage settings", async () => {
+    const ctx = makeCtx()
+    setStoredApiKey(ctx, "stored-token")
+    ctx.host.http.request.mockImplementation((opts) => {
+      expect(opts.url).toBe("https://api.z.ai/api/monitor/usage/quota/limit")
+      expect(opts.headers.authorization).toBe("Bearer stored-token")
+      return { status: 200, headers: {}, bodyText: makeQuotaResponse() }
+    })
+
+    const plugin = await loadPlugin()
+    plugin.probe(ctx)
   })
 
   it("surfaces subscription guidance when response has no limits payload", async () => {
     const ctx = makeCtx()
-    ctx.host.env.get.mockImplementation((name) => (name === "Z_AI_API_KEY" ? "zai-token" : null))
+    setStoredApiKey(ctx)
     ctx.host.http.request.mockReturnValue({
       status: 200,
       headers: {},
@@ -63,127 +108,9 @@ describe("zai plugin", () => {
     expect(() => plugin.probe(ctx)).toThrow("active subscription")
   })
 
-  it("uses token from OpenUsage settings when env is missing", async () => {
-    const ctx = makeCtx()
-    ctx.host.fs.writeText(
-      "/tmp/openusage-test/settings.json",
-      JSON.stringify({ zaiApiKey: "stored-token" })
-    )
-    ctx.host.http.request.mockImplementation((opts) => {
-      expect(opts.headers.authorization).toBe("Bearer stored-token")
-      return { status: 200, headers: {}, bodyText: makeQuotaResponse() }
-    })
-
-    const plugin = await loadPlugin()
-    plugin.probe(ctx)
-  })
-
-  it("uses token from ~/.claude/settings.json env.Z_AI_API_KEY", async () => {
-    const ctx = makeCtx()
-    ctx.host.fs.writeText(
-      "~/.claude/settings.json",
-      JSON.stringify({ env: { Z_AI_API_KEY: "claude-zai-token" } })
-    )
-    ctx.host.http.request.mockImplementation((opts) => {
-      expect(opts.headers.authorization).toBe("Bearer claude-zai-token")
-      return { status: 200, headers: {}, bodyText: makeQuotaResponse() }
-    })
-
-    const plugin = await loadPlugin()
-    plugin.probe(ctx)
-  })
-
-  it("uses anthropic token from Claude settings when base URL is z.ai and infers host", async () => {
-    const ctx = makeCtx()
-    ctx.host.fs.writeText(
-      "~/.claude/settings.json",
-      JSON.stringify({
-        env: {
-          ANTHROPIC_AUTH_TOKEN: "anth-token",
-          ANTHROPIC_BASE_URL: "https://open.bigmodel.cn/api/anthropic/v1",
-        },
-      })
-    )
-    ctx.host.http.request.mockImplementation((opts) => {
-      expect(opts.url).toBe("https://open.bigmodel.cn/api/monitor/usage/quota/limit")
-      expect(opts.headers.authorization).toBe("Bearer anth-token")
-      return { status: 200, headers: {}, bodyText: makeQuotaResponse() }
-    })
-
-    const plugin = await loadPlugin()
-    plugin.probe(ctx)
-  })
-
-  it("does not use anthropic token when Claude base URL is not z.ai", async () => {
-    const ctx = makeCtx()
-    ctx.host.fs.writeText(
-      "~/.claude/settings.json",
-      JSON.stringify({
-        env: {
-          ANTHROPIC_AUTH_TOKEN: "anth-token",
-          ANTHROPIC_BASE_URL: "https://api.anthropic.com",
-        },
-      })
-    )
-
-    const plugin = await loadPlugin()
-    expect(() => plugin.probe(ctx)).toThrow("Missing API token")
-  })
-
-  it("uses global quota endpoint by default with bearer auth", async () => {
-    const ctx = makeCtx()
-    ctx.host.env.get.mockImplementation((name) => (name === "Z_AI_API_KEY" ? "zai-token" : null))
-
-    ctx.host.http.request.mockImplementation((opts) => {
-      expect(opts.url).toBe("https://api.z.ai/api/monitor/usage/quota/limit")
-      expect(opts.headers.authorization).toBe("Bearer zai-token")
-      return { status: 200, headers: {}, bodyText: makeQuotaResponse() }
-    })
-
-    const plugin = await loadPlugin()
-    const result = plugin.probe(ctx)
-
-    expect(result.plan).toBe("Pro")
-    expect(result.lines.find((line) => line.label === "Tokens")).toBeTruthy()
-  })
-
-  it("uses Z_AI_API_HOST and appends quota path when host has no path", async () => {
-    const ctx = makeCtx()
-    ctx.host.env.get.mockImplementation((name) => {
-      if (name === "Z_AI_API_KEY") return "zai-token"
-      if (name === "Z_AI_API_HOST") return "open.bigmodel.cn"
-      return null
-    })
-
-    ctx.host.http.request.mockImplementation((opts) => {
-      expect(opts.url).toBe("https://open.bigmodel.cn/api/monitor/usage/quota/limit")
-      return { status: 200, headers: {}, bodyText: makeQuotaResponse() }
-    })
-
-    const plugin = await loadPlugin()
-    plugin.probe(ctx)
-  })
-
-  it("uses Z_AI_QUOTA_URL override exactly", async () => {
-    const ctx = makeCtx()
-    ctx.host.env.get.mockImplementation((name) => {
-      if (name === "Z_AI_API_KEY") return "zai-token"
-      if (name === "Z_AI_QUOTA_URL") return "https://open.bigmodel.cn/api/coding/paas/v4"
-      return null
-    })
-
-    ctx.host.http.request.mockImplementation((opts) => {
-      expect(opts.url).toBe("https://open.bigmodel.cn/api/coding/paas/v4")
-      return { status: 200, headers: {}, bodyText: makeQuotaResponse() }
-    })
-
-    const plugin = await loadPlugin()
-    plugin.probe(ctx)
-  })
-
   it("retries with raw token when bearer auth is rejected", async () => {
     const ctx = makeCtx()
-    ctx.host.env.get.mockImplementation((name) => (name === "Z_AI_API_KEY" ? "zai-token" : null))
+    setStoredApiKey(ctx)
 
     let requestCount = 0
     ctx.host.http.request.mockImplementation((opts) => {
@@ -205,7 +132,7 @@ describe("zai plugin", () => {
 
   it("maps token/time limits to progress lines with pacing", async () => {
     const ctx = makeCtx()
-    ctx.host.env.get.mockImplementation((name) => (name === "Z_AI_API_KEY" ? "zai-token" : null))
+    setStoredApiKey(ctx)
     ctx.host.http.request.mockReturnValue({
       status: 200,
       headers: {},
@@ -227,7 +154,7 @@ describe("zai plugin", () => {
 
   it("surfaces API error messages from response envelope", async () => {
     const ctx = makeCtx()
-    ctx.host.env.get.mockImplementation((name) => (name === "Z_AI_API_KEY" ? "zai-token" : null))
+    setStoredApiKey(ctx)
     ctx.host.http.request.mockReturnValue({
       status: 200,
       headers: {},
@@ -238,9 +165,22 @@ describe("zai plugin", () => {
     expect(() => plugin.probe(ctx)).toThrow("Authorization Token Missing")
   })
 
+  it("throws token invalid for auth status responses", async () => {
+    const ctx = makeCtx()
+    setStoredApiKey(ctx)
+    ctx.host.http.request.mockReturnValue({
+      status: 403,
+      headers: {},
+      bodyText: "{}",
+    })
+
+    const plugin = await loadPlugin()
+    expect(() => plugin.probe(ctx)).toThrow("Token invalid")
+  })
+
   it("throws on invalid JSON", async () => {
     const ctx = makeCtx()
-    ctx.host.env.get.mockImplementation((name) => (name === "Z_AI_API_KEY" ? "zai-token" : null))
+    setStoredApiKey(ctx)
     ctx.host.http.request.mockReturnValue({
       status: 200,
       headers: {},
