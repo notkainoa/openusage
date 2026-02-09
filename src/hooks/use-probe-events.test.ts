@@ -38,9 +38,10 @@ describe("useProbeEvents", () => {
     const onBatchComplete = vi.fn()
     const { result } = renderHook(() => useProbeEvents({ onResult, onBatchComplete }))
 
-    const ids = await act(() => result.current.startBatch(["a", "b"]))
+    const batch = await act(() => result.current.startBatch(["a", "b"]))
     expect(invokeMock).toHaveBeenCalledWith("start_probe_batch", expect.objectContaining({ pluginIds: ["a", "b"] }))
-    expect(ids).toEqual(["a", "b"])
+    expect(batch.pluginIds).toEqual(["a", "b"])
+    expect(batch.batchId).toEqual(expect.any(String))
   })
 
   it("starts batch without plugin ids and uses fallback id", async () => {
@@ -55,8 +56,9 @@ describe("useProbeEvents", () => {
       const { result } = renderHook(() =>
         useProbeEvents({ onResult: vi.fn(), onBatchComplete: vi.fn() })
       )
-      const ids = await act(() => result.current.startBatch())
-      expect(ids).toEqual([])
+      const batch = await act(() => result.current.startBatch())
+      expect(batch.pluginIds).toEqual([])
+      expect(batch.batchId).toEqual(expect.stringMatching(/^batch-/))
       expect(invokeMock).toHaveBeenCalledWith(
         "start_probe_batch",
         expect.objectContaining({ batchId: expect.stringMatching(/^batch-/) })
@@ -94,6 +96,26 @@ describe("useProbeEvents", () => {
     }
   })
 
+  it("uses caller-provided batch id when passed", async () => {
+    invokeMock.mockImplementation(async (_cmd: string, args: any) => ({
+      batchId: args.batchId,
+      pluginIds: args.pluginIds ?? [],
+    }))
+    const { result } = renderHook(() =>
+      useProbeEvents({ onResult: vi.fn(), onBatchComplete: vi.fn() })
+    )
+
+    const batch = await act(() =>
+      result.current.startBatch(["zai"], { batchId: "key-check-1" })
+    )
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      "start_probe_batch",
+      expect.objectContaining({ batchId: "key-check-1", pluginIds: ["zai"] })
+    )
+    expect(batch).toEqual({ batchId: "key-check-1", pluginIds: ["zai"] })
+  })
+
   it("starts batch after unmount without waiting for listeners", async () => {
     invokeMock.mockImplementation(async (_cmd: string, args: any) => ({
       batchId: args.batchId,
@@ -104,8 +126,9 @@ describe("useProbeEvents", () => {
     )
     const start = result.current.startBatch
     unmount()
-    const ids = await act(() => start())
-    expect(ids).toEqual([])
+    const batch = await act(() => start())
+    expect(batch.pluginIds).toEqual([])
+    expect(batch.batchId).toEqual(expect.any(String))
     expect(invokeMock).toHaveBeenCalled()
   })
 
@@ -126,7 +149,7 @@ describe("useProbeEvents", () => {
     const resultListener = listeners.get("probe:result")
     const completeListener = listeners.get("probe:batch-complete")
     resultListener?.({ payload: { batchId, output } })
-    expect(onResult).toHaveBeenCalledWith(output)
+    expect(onResult).toHaveBeenCalledWith({ batchId, output })
 
     completeListener?.({ payload: { batchId } })
     expect(onBatchComplete).toHaveBeenCalledTimes(1)

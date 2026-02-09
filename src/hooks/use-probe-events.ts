@@ -18,8 +18,18 @@ type ProbeBatchStarted = {
 }
 
 type UseProbeEventsOptions = {
-  onResult: (output: PluginOutput) => void
+  onResult: (result: ProbeResult) => void
   onBatchComplete: () => void
+}
+
+type StartBatchOptions = {
+  batchId?: string
+}
+
+function createBatchId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `batch-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
 export function useProbeEvents({ onResult, onBatchComplete }: UseProbeEventsOptions) {
@@ -39,7 +49,7 @@ export function useProbeEvents({ onResult, onBatchComplete }: UseProbeEventsOpti
     const setup = async () => {
       const resultUnlisten = await listen<ProbeResult>("probe:result", (event) => {
         if (activeBatchIds.current.has(event.payload.batchId)) {
-          onResult(event.payload.output)
+          onResult(event.payload)
         }
       })
 
@@ -80,29 +90,29 @@ export function useProbeEvents({ onResult, onBatchComplete }: UseProbeEventsOpti
     }
   }, [onBatchComplete, onResult])
 
-  const startBatch = useCallback(async (pluginIds?: string[]) => {
-    // Wait for listeners to be ready before starting the batch
-    if (listenersReadyRef.current) {
-      await listenersReadyRef.current
-    }
+  const startBatch = useCallback(
+    async (pluginIds?: string[], options?: StartBatchOptions) => {
+      const requestedBatchId = options?.batchId?.trim()
+      const batchId = requestedBatchId ? requestedBatchId : createBatchId()
 
-    const batchId =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `batch-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      // Wait for listeners to be ready before starting the batch
+      if (listenersReadyRef.current) {
+        await listenersReadyRef.current
+      }
 
-    activeBatchIds.current.add(batchId)
-    const args = pluginIds
-      ? { batchId, pluginIds }
-      : { batchId }
-    try {
-      const result = await invoke<ProbeBatchStarted>("start_probe_batch", args)
-      return result.pluginIds
-    } catch (error) {
-      activeBatchIds.current.delete(batchId)
-      throw error
-    }
-  }, [])
+      activeBatchIds.current.add(batchId)
+      const args = pluginIds
+        ? { batchId, pluginIds }
+        : { batchId }
+      try {
+        return await invoke<ProbeBatchStarted>("start_probe_batch", args)
+      } catch (error) {
+        activeBatchIds.current.delete(batchId)
+        throw error
+      }
+    },
+    []
+  )
 
   return { startBatch }
 }

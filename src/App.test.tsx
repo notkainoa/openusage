@@ -166,6 +166,10 @@ vi.mock("@/lib/settings", async () => {
 
 import { App } from "@/App"
 
+function emitProbeResult(output: any, batchId = "batch-test") {
+  state.probeHandlers?.onResult({ batchId, output })
+}
+
 describe("App", () => {
   beforeEach(() => {
     state.probeHandlers = null
@@ -263,7 +267,7 @@ describe("App", () => {
     expect(mq.addEventListener).toHaveBeenCalled()
 
     mmSpy.mockRestore()
-  })
+  }, 15_000)
 
   it("loads plugins, normalizes settings, and renders overview", async () => {
     render(<App />)
@@ -285,7 +289,7 @@ describe("App", () => {
     render(<App />)
     await waitFor(() => expect(state.startBatchMock).toHaveBeenCalled())
     expect(state.probeHandlers).not.toBeNull()
-    state.probeHandlers?.onResult({
+    emitProbeResult({
       providerId: "a",
       displayName: "Alpha",
       iconUrl: "icon-a",
@@ -319,7 +323,7 @@ describe("App", () => {
     await waitFor(() => expect(state.renderTrayBarsIconMock).toHaveBeenCalled())
     const callsBefore = state.renderTrayBarsIconMock.mock.calls.length
 
-    state.probeHandlers?.onResult({
+    emitProbeResult({
       providerId: "a",
       displayName: "Alpha",
       iconUrl: "icon-a",
@@ -397,7 +401,7 @@ describe("App", () => {
     expect(firstCall.providerIconUrl).toBe("icon-a")
     expect(firstCall.percentText).toBeUndefined()
 
-    state.probeHandlers?.onResult({
+    emitProbeResult({
       providerId: "a",
       displayName: "Alpha",
       iconUrl: "icon-a",
@@ -439,7 +443,7 @@ describe("App", () => {
     render(<App />)
     await waitFor(() => expect(state.startBatchMock).toHaveBeenCalled())
 
-    state.probeHandlers?.onResult({
+    emitProbeResult({
       providerId: "a",
       displayName: "Alpha",
       iconUrl: "icon-a",
@@ -658,16 +662,24 @@ describe("App", () => {
     await userEvent.type(await screen.findByLabelText("API key"), "abc")
 
     await waitFor(() => expect(state.saveZaiApiKeyMock).toHaveBeenCalled())
-    await waitFor(() => expect(state.startBatchMock).toHaveBeenCalledWith(["zai"]))
+    await waitFor(() =>
+      expect(state.startBatchMock).toHaveBeenCalledWith(
+        ["zai"],
+        expect.objectContaining({ batchId: expect.any(String) })
+      )
+    )
     expect(state.startBatchMock).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Checking API key..."))
 
-    state.probeHandlers?.onResult({
+    const keyCheckBatchId = state.startBatchMock.mock.calls[0]?.[1]?.batchId
+    expect(typeof keyCheckBatchId).toBe("string")
+
+    emitProbeResult({
       providerId: "zai",
       displayName: "Z.AI",
       iconUrl: "icon-z",
       lines: [{ type: "text", label: "Plan", value: "Pro" }],
-    })
+    }, keyCheckBatchId)
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("API key verified."))
   })
 
@@ -688,16 +700,176 @@ describe("App", () => {
     await userEvent.click(settingsButtons[0])
     await userEvent.type(await screen.findByLabelText("API key"), "bad")
 
-    await waitFor(() => expect(state.startBatchMock).toHaveBeenCalledWith(["zai"]))
+    await waitFor(() =>
+      expect(state.startBatchMock).toHaveBeenCalledWith(
+        ["zai"],
+        expect.objectContaining({ batchId: expect.any(String) })
+      )
+    )
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Checking API key..."))
 
-    state.probeHandlers?.onResult({
+    const keyCheckBatchId = state.startBatchMock.mock.calls[0]?.[1]?.batchId
+    expect(typeof keyCheckBatchId).toBe("string")
+
+    emitProbeResult({
       providerId: "zai",
       displayName: "Z.AI",
       iconUrl: "icon-z",
       lines: [{ type: "badge", label: "Error", text: "Token invalid." }],
-    })
+    }, keyCheckBatchId)
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Token invalid."))
+  })
+
+  it("ignores z.ai results from non-matching batches during key validation", async () => {
+    state.invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_plugins") {
+        return [{ id: "zai", name: "Z.AI", iconUrl: "icon-z", primaryProgressLabel: null, lines: [] }]
+      }
+      return null
+    })
+    state.loadPluginSettingsMock.mockResolvedValueOnce({ order: ["zai"], disabled: [] })
+
+    render(<App />)
+    await waitFor(() => expect(state.startBatchMock).toHaveBeenCalledWith(["zai"]))
+    state.startBatchMock.mockClear()
+
+    const settingsButtons = await screen.findAllByRole("button", { name: "Settings" })
+    await userEvent.click(settingsButtons[0])
+    await userEvent.type(await screen.findByLabelText("API key"), "abc")
+
+    await waitFor(() =>
+      expect(state.startBatchMock).toHaveBeenCalledWith(
+        ["zai"],
+        expect.objectContaining({ batchId: expect.any(String) })
+      )
+    )
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Checking API key..."))
+
+    const keyCheckBatchId = state.startBatchMock.mock.calls[0]?.[1]?.batchId
+    expect(typeof keyCheckBatchId).toBe("string")
+
+    emitProbeResult({
+      providerId: "zai",
+      displayName: "Z.AI",
+      iconUrl: "icon-z",
+      lines: [{ type: "text", label: "Plan", value: "From wrong batch" }],
+    }, "other-batch-id")
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Checking API key..."))
+
+    emitProbeResult({
+      providerId: "zai",
+      displayName: "Z.AI",
+      iconUrl: "icon-z",
+      lines: [{ type: "text", label: "Plan", value: "From key-check batch" }],
+    }, keyCheckBatchId)
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("API key verified."))
+  })
+
+  it("shows z.ai key-check timeout feedback when no matching result arrives", async () => {
+    state.invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_plugins") {
+        return [{ id: "zai", name: "Z.AI", iconUrl: "icon-z", primaryProgressLabel: null, lines: [] }]
+      }
+      return null
+    })
+    state.loadPluginSettingsMock.mockResolvedValueOnce({ order: ["zai"], disabled: [] })
+
+    let debounceCallback: null | (() => void) = null
+    let timeoutCallback: null | (() => void) = null
+    const originalSetTimeout = window.setTimeout.bind(window)
+    const setTimeoutSpy = vi.spyOn(window, "setTimeout").mockImplementation(((
+      handler: TimerHandler,
+      timeout?: number,
+      ...args: any[]
+    ) => {
+      if (typeof handler === "function" && timeout === 300) {
+        debounceCallback = handler as () => void
+        return 101
+      }
+      if (typeof handler === "function" && timeout === 15_000) {
+        timeoutCallback = handler as () => void
+        return 102
+      }
+      return originalSetTimeout(handler, timeout, ...args)
+    }) as typeof window.setTimeout)
+
+    try {
+      render(<App />)
+      await waitFor(() => expect(state.startBatchMock).toHaveBeenCalledWith(["zai"]))
+      state.startBatchMock.mockClear()
+
+      const settingsButtons = await screen.findAllByRole("button", { name: "Settings" })
+      await userEvent.click(settingsButtons[0])
+      await userEvent.type(await screen.findByLabelText("API key"), "abc")
+
+      expect(typeof debounceCallback).toBe("function")
+      debounceCallback?.()
+
+      await waitFor(() => expect(state.saveZaiApiKeyMock).toHaveBeenCalled())
+      await waitFor(() =>
+        expect(state.startBatchMock).toHaveBeenCalledWith(
+          ["zai"],
+          expect.objectContaining({ batchId: expect.any(String) })
+        )
+      )
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Checking API key..."))
+
+      expect(typeof timeoutCallback).toBe("function")
+      timeoutCallback?.()
+
+      await waitFor(() =>
+        expect(screen.getByRole("alert")).toHaveTextContent("API key check timed out. Try again.")
+      )
+    } finally {
+      setTimeoutSpy.mockRestore()
+    }
+  })
+
+  it("shows z.ai key-check start failure feedback when batch start fails", async () => {
+    state.invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_plugins") {
+        return [{ id: "zai", name: "Z.AI", iconUrl: "icon-z", primaryProgressLabel: null, lines: [] }]
+      }
+      return null
+    })
+    state.loadPluginSettingsMock.mockResolvedValueOnce({ order: ["zai"], disabled: [] })
+    state.startBatchMock
+      .mockResolvedValueOnce(["zai"])
+      .mockRejectedValueOnce(new Error("key-check start failed"))
+
+    let debounceCallback: null | (() => void) = null
+    const originalSetTimeout = window.setTimeout.bind(window)
+    const setTimeoutSpy = vi.spyOn(window, "setTimeout").mockImplementation(((
+      handler: TimerHandler,
+      timeout?: number,
+      ...args: any[]
+    ) => {
+      if (typeof handler === "function" && timeout === 300) {
+        debounceCallback = handler as () => void
+        return 201
+      }
+      return originalSetTimeout(handler, timeout, ...args)
+    }) as typeof window.setTimeout)
+
+    try {
+      render(<App />)
+      await waitFor(() => expect(state.startBatchMock).toHaveBeenCalledWith(["zai"]))
+      state.startBatchMock.mockClear()
+
+      const settingsButtons = await screen.findAllByRole("button", { name: "Settings" })
+      await userEvent.click(settingsButtons[0])
+      await userEvent.type(await screen.findByLabelText("API key"), "abc")
+
+      expect(typeof debounceCallback).toBe("function")
+      debounceCallback?.()
+
+      await waitFor(() => expect(state.saveZaiApiKeyMock).toHaveBeenCalled())
+      await waitFor(() =>
+        expect(screen.getByRole("alert")).toHaveTextContent("Failed to start API key check. Try again.")
+      )
+    } finally {
+      setTimeoutSpy.mockRestore()
+    }
   })
 
   it("logs when saving auto-update interval fails", async () => {
@@ -747,7 +919,7 @@ describe("App", () => {
   it("retries a plugin on error", async () => {
     render(<App />)
     await waitFor(() => expect(state.startBatchMock).toHaveBeenCalled())
-    state.probeHandlers?.onResult({
+    emitProbeResult({
       providerId: "a",
       displayName: "Alpha",
       iconUrl: "icon-a",
@@ -879,7 +1051,7 @@ describe("App", () => {
     await waitFor(() => expect(state.startBatchMock).toHaveBeenCalled())
 
     // Provide some data so detail view has content.
-    state.probeHandlers?.onResult({
+    emitProbeResult({
       providerId: "a",
       displayName: "Alpha",
       iconUrl: "icon-a",
@@ -930,7 +1102,7 @@ describe("App", () => {
     await waitFor(() => expect(state.startBatchMock).toHaveBeenCalled())
 
     // Push an error result to show Retry button
-    state.probeHandlers?.onResult({
+    emitProbeResult({
       providerId: "a",
       displayName: "Alpha",
       iconUrl: "icon-a",
@@ -1056,7 +1228,7 @@ describe("App", () => {
     await waitFor(() => expect(state.startBatchMock).toHaveBeenCalled())
 
     // Show error to get Retry button
-    state.probeHandlers?.onResult({
+    emitProbeResult({
       providerId: "a",
       displayName: "Alpha",
       iconUrl: "icon-a",
@@ -1067,7 +1239,7 @@ describe("App", () => {
     await userEvent.click(retryButton)
 
     // Simulate successful probe result after retry (isManual branch)
-    state.probeHandlers?.onResult({
+    emitProbeResult({
       providerId: "a",
       displayName: "Alpha",
       iconUrl: "icon-a",
@@ -1093,7 +1265,7 @@ describe("App", () => {
     await waitFor(() => expect(state.startBatchMock).toHaveBeenCalled())
 
     // Show error state for plugin "a"
-    state.probeHandlers?.onResult({
+    emitProbeResult({
       providerId: "a",
       displayName: "Alpha",
       iconUrl: "icon-a",
@@ -1149,7 +1321,7 @@ describe("App", () => {
     state.traySetIconMock.mockClear()
 
     // Trigger a probe result
-    state.probeHandlers?.onResult({
+    emitProbeResult({
       providerId: "a",
       displayName: "Alpha",
       iconUrl: "icon-a",

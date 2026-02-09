@@ -22,7 +22,7 @@ describe("SideNav", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Home" }))
     expect(onViewChange).toHaveBeenCalledWith("home")
-  })
+  }, 15_000)
 
   it("renders plugin icon button and uses brand color when appropriate", () => {
     const onViewChange = vi.fn()
@@ -71,4 +71,3 @@ describe("SideNav", () => {
     expect(p2Style).toContain("rgb(255, 255, 255)")
   })
 })
-

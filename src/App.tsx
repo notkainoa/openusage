@@ -11,6 +11,7 @@ import { OverviewPage } from "@/pages/overview"
 import { ProviderDetailPage } from "@/pages/provider-detail"
 import { SettingsPage } from "@/pages/settings"
 import type { PluginMeta, PluginOutput } from "@/lib/plugin-types"
+import { track } from "@/lib/analytics"
 import { getTrayIconSizePx, renderTrayBarsIcon } from "@/lib/tray-bars-icon"
 import { getTrayPrimaryBars } from "@/lib/tray-primary-progress"
 import { useProbeEvents } from "@/hooks/use-probe-events"
@@ -67,6 +68,12 @@ type ZaiApiKeyValidation = {
   message: string | null
 }
 
+function createProbeBatchId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `batch-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
 function App() {
   const [activeView, setActiveView] = useState<ActiveView>("home");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -104,6 +111,7 @@ function App() {
   const zaiApiKeyTimeoutTimerRef = useRef<number | null>(null)
   const zaiApiKeyRequestIdRef = useRef(0)
   const zaiApiKeyPendingRequestIdRef = useRef<number | null>(null)
+  const zaiApiKeyPendingBatchIdRef = useRef<string | null>(null)
   const [trayReady, setTrayReady] = useState(false)
 
   // Store state in refs so scheduleTrayIconUpdate can read current values without recreating the callback
@@ -144,6 +152,7 @@ function App() {
       clearZaiApiKeyCheckDebounce()
       clearZaiApiKeyCheckTimeout()
       zaiApiKeyPendingRequestIdRef.current = null
+      zaiApiKeyPendingBatchIdRef.current = null
     }
   }, [clearZaiApiKeyCheckDebounce, clearZaiApiKeyCheckTimeout])
 
@@ -310,6 +319,19 @@ function App() {
       .map((p) => ({ id: p.id, name: p.name, iconUrl: p.iconUrl, brandColor: p.brandColor }))
   }, [pluginSettings, pluginsMeta])
 
+  // Track page views
+  useEffect(() => {
+    const page =
+      activeView === "home" ? "overview"
+        : activeView === "settings" ? "settings"
+          : "provider_detail"
+    const props: Record<string, string> =
+      activeView !== "home" && activeView !== "settings"
+        ? { page, provider_id: activeView }
+        : { page }
+    track("page_viewed", props)
+  }, [activeView])
+
   // If active view is a plugin that got disabled, switch to home
   useEffect(() => {
     if (activeView === "home" || activeView === "settings") return
@@ -464,8 +486,15 @@ function App() {
   const manualRefreshIdsRef = useRef<Set<string>>(new Set())
 
   const handleProbeResult = useCallback(
-    (output: PluginOutput) => {
+    (result: { batchId: string; output: PluginOutput }) => {
+      const { batchId, output } = result
       const errorMessage = getErrorMessage(output)
+      if (errorMessage) {
+        track("provider_fetch_error", {
+          provider_id: output.providerId,
+          error: errorMessage.slice(0, 200),
+        })
+      }
       const isManual = manualRefreshIdsRef.current.has(output.providerId)
       if (isManual) {
         manualRefreshIdsRef.current.delete(output.providerId)
@@ -485,8 +514,15 @@ function App() {
 
       if (output.providerId === "zai") {
         const pendingRequestId = zaiApiKeyPendingRequestIdRef.current
-        if (pendingRequestId !== null && pendingRequestId === zaiApiKeyRequestIdRef.current) {
+        const pendingBatchId = zaiApiKeyPendingBatchIdRef.current
+        if (
+          pendingRequestId !== null &&
+          pendingRequestId === zaiApiKeyRequestIdRef.current &&
+          pendingBatchId !== null &&
+          pendingBatchId === batchId
+        ) {
           zaiApiKeyPendingRequestIdRef.current = null
+          zaiApiKeyPendingBatchIdRef.current = null
           clearZaiApiKeyCheckTimeout()
           if (errorMessage) {
             setZaiApiKeyValidation({
@@ -656,6 +692,7 @@ function App() {
       clearZaiApiKeyCheckDebounce()
       clearZaiApiKeyCheckTimeout()
       zaiApiKeyPendingRequestIdRef.current = null
+      zaiApiKeyPendingBatchIdRef.current = null
       setZaiApiKeyValidation((prev) =>
         prev.status === "idle" && prev.message === null
           ? prev
@@ -704,6 +741,7 @@ function App() {
 
   const handleRetryPlugin = useCallback(
     (id: string) => {
+      track("provider_refreshed", { provider_id: id })
       resetAutoUpdateSchedule()
       // Mark as manual refresh
       manualRefreshIdsRef.current.add(id)
@@ -717,6 +755,7 @@ function App() {
   )
 
   const handleThemeModeChange = useCallback((mode: ThemeMode) => {
+    track("setting_changed", { setting: "theme", value: mode })
     setThemeMode(mode)
     void saveThemeMode(mode).catch((error) => {
       console.error("Failed to save theme mode:", error)
@@ -724,6 +763,7 @@ function App() {
   }, [])
 
   const handleDisplayModeChange = useCallback((mode: DisplayMode) => {
+    track("setting_changed", { setting: "display_mode", value: mode })
     setDisplayMode(mode)
     // Display mode is a direct user-facing toggle; update tray immediately.
     scheduleTrayIconUpdate("settings", 0)
@@ -733,6 +773,7 @@ function App() {
   }, [scheduleTrayIconUpdate])
 
   const handleTrayIconStyleChange = useCallback((style: TrayIconStyle) => {
+    track("setting_changed", { setting: "tray_icon_style", value: style })
     const mandatory = isTrayPercentageMandatory(style)
     if (mandatory && trayShowPercentageRef.current !== true) {
       trayShowPercentageRef.current = true
@@ -752,6 +793,7 @@ function App() {
   }, [scheduleTrayIconUpdate])
 
   const handleTrayShowPercentageChange = useCallback((value: boolean) => {
+    track("setting_changed", { setting: "tray_show_percentage", value: value ? "true" : "false" })
     trayShowPercentageRef.current = value
     setTrayShowPercentage(value)
     // Tray icon text visibility is a direct user-facing toggle; update tray immediately.
@@ -762,6 +804,7 @@ function App() {
   }, [scheduleTrayIconUpdate])
 
   const handleAutoUpdateIntervalChange = useCallback((value: AutoUpdateIntervalMinutes) => {
+    track("setting_changed", { setting: "auto_refresh", value: String(value) })
     setAutoUpdateInterval(value)
     if (pluginSettings) {
       const enabledIds = getEnabledPluginIds(pluginSettings)
@@ -782,6 +825,7 @@ function App() {
     clearZaiApiKeyCheckDebounce()
     clearZaiApiKeyCheckTimeout()
     zaiApiKeyPendingRequestIdRef.current = null
+    zaiApiKeyPendingBatchIdRef.current = null
 
     const requestId = zaiApiKeyRequestIdRef.current + 1
     zaiApiKeyRequestIdRef.current = requestId
@@ -811,12 +855,16 @@ function App() {
           status: "checking",
           message: "Checking API key...",
         })
+        const batchId = createProbeBatchId()
         zaiApiKeyPendingRequestIdRef.current = requestId
+        zaiApiKeyPendingBatchIdRef.current = batchId
         clearZaiApiKeyCheckTimeout()
         zaiApiKeyTimeoutTimerRef.current = window.setTimeout(() => {
           if (requestId !== zaiApiKeyRequestIdRef.current) return
           if (zaiApiKeyPendingRequestIdRef.current !== requestId) return
+          if (zaiApiKeyPendingBatchIdRef.current !== batchId) return
           zaiApiKeyPendingRequestIdRef.current = null
+          zaiApiKeyPendingBatchIdRef.current = null
           setZaiApiKeyValidation({
             status: "error",
             message: "API key check timed out. Try again.",
@@ -826,11 +874,12 @@ function App() {
 
         setLoadingForPlugins(["zai"])
         try {
-          await startBatch(["zai"])
+          await startBatch(["zai"], { batchId })
         } catch (error) {
           if (requestId !== zaiApiKeyRequestIdRef.current) return
           console.error("Failed to refresh z.ai after api key change:", error)
           zaiApiKeyPendingRequestIdRef.current = null
+          zaiApiKeyPendingBatchIdRef.current = null
           clearZaiApiKeyCheckTimeout()
           setZaiApiKeyValidation({
             status: "error",
@@ -869,6 +918,7 @@ function App() {
   const handleReorder = useCallback(
     (orderedIds: string[]) => {
       if (!pluginSettings) return
+      track("providers_reordered", { count: orderedIds.length })
       const nextSettings: PluginSettings = {
         ...pluginSettings,
         order: orderedIds,
@@ -886,6 +936,7 @@ function App() {
     (id: string) => {
       if (!pluginSettings) return
       const wasDisabled = pluginSettings.disabled.includes(id)
+      track("provider_toggled", { provider_id: id, enabled: wasDisabled ? "true" : "false" })
       const disabled = new Set(pluginSettings.disabled)
 
       if (wasDisabled) {

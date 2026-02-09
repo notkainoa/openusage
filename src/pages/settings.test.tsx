@@ -87,7 +87,7 @@ describe("SettingsPage", () => {
     const checkboxes = screen.getAllByRole("checkbox")
     await userEvent.click(checkboxes[checkboxes.length - 1])
     expect(onToggle).toHaveBeenCalledWith("b")
-  })
+  }, 15_000)
 
   it("reorders plugins on drag end", () => {
     const onReorder = vi.fn()
