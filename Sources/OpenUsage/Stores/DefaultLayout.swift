@@ -38,6 +38,9 @@ enum DefaultLayout {
 
         "devin.daily", "devin.weekly", "devin.extra",
 
+        "factory.session", "factory.weekly", "factory.monthly",
+        "factory.coreSession", "factory.coreWeekly", "factory.coreMonthly", "factory.extra",
+
         "grok.weekly", "grok.trend",
         "grok.payAsYouGo", "grok.today", "grok.yesterday", "grok.last30",
 
@@ -81,6 +84,7 @@ enum DefaultLayout {
         "codex.session", "codex.weekly",
         "cursor.auto", "cursor.api",
         "copilot.premium",
+        "factory.session", "factory.weekly",
         "ollama.session", "ollama.weekly",
         "openrouter.credits",
         "zai.session", "zai.weekly"
@@ -111,6 +115,9 @@ enum DefaultLayout {
         // (suppressed), so they read "No data" there.
         "copilot.orgCredits", "copilot.orgSpend", "copilot.chat", "copilot.completions",
         "devin.extra",
+        // Factory: the Standard pool (Session/Weekly/Monthly) stays above the fold; the Droid Core
+        // pool and the Extra Usage balance sit below the caret, like Codex Spark and Devin's balance.
+        "factory.coreSession", "factory.coreWeekly", "factory.coreMonthly", "factory.extra",
         "grok.payAsYouGo", "grok.today", "grok.yesterday", "grok.last30",
         // Ollama: Session, Weekly, and Monthly stay above the fold; the rolling four-week spend total
         // (always $0.00 on a subscription, real only for pay-as-you-go) sits below the caret.

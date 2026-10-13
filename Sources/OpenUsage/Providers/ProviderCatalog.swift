@@ -76,6 +76,7 @@ enum ProviderCatalog {
             AntigravityProvider(),
             CopilotProvider(defaults: defaults),
             DevinProvider(),
+            FactoryProvider(),
             GrokProvider(),
             OllamaProvider(),
             OpenCodeProvider(),

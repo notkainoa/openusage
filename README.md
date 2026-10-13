@@ -28,6 +28,7 @@ Either way, the app updates itself in place via signed, notarized [Sparkle](docs
 - **[Copilot](docs/providers/copilot.md)** — AI credits, extra usage, organization billing, chat and completions
 - **[Cursor](docs/providers/cursor.md)** — credits, total usage, Grok Bot, Cursor Models, Other Models, requests, on-demand, per-day spend
 - **[Devin](docs/providers/devin.md)** — weekly and daily quota, extra usage balance
+- **[Factory](docs/providers/factory.md)** — Droid session, weekly, and monthly limits, Droid Core pool, extra usage balance
 - **[Grok](docs/providers/grok.md)** — weekly shared pool, pay-as-you-go, local daily spend
 - **[Ollama](docs/providers/ollama.md)** — Ollama Cloud session and weekly limits, recent activity spend
 - **[OpenCode](docs/providers/opencode.md)** — Go session/weekly/monthly caps, Zen spend, local daily spend
