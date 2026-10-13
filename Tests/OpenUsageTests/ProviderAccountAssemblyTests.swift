@@ -77,4 +77,49 @@ final class ProviderAccountAssemblyTests: XCTestCase {
         XCTAssertTrue(store.records.isEmpty)
         XCTAssertNil(defaults.data(forKey: ProviderAccountsStore.storageKey), "no observations, no write")
     }
+
+    func testFamilyDiscoveryRunsOffMainActor() async {
+        let store = ProviderAccountsStore(defaults: makeScratchDefaults())
+        let observer = DefaultAccountObserver(
+            environment: FakeEnvironment([:]),
+            files: BackgroundDiscoveryFiles(),
+            keychain: FakeKeychain(nil),
+            homeDirectory: { URL(fileURLWithPath: "/Users/dev") }
+        )
+
+        let assembly = await ProviderAccountAssembly.make(
+            observer: observer,
+            accountsStore: store,
+            listCodexHomeDirectories: { path in
+                guard path == "/Users/dev" else { return [] }
+                return Thread.isMainThread ? [".codex-main"] : [".codex-background"]
+            }
+        )
+
+        XCTAssertEqual(assembly.identityKeysByCard["claude"], "claude-id")
+        XCTAssertEqual(assembly.codex.plainAuthHomes, ["/Users/dev/.codex-background"])
+    }
+}
+
+private struct BackgroundDiscoveryFiles: TextFileAccessing {
+    func exists(_ path: String) -> Bool { false }
+
+    func readTextIfPresent(_ path: String) throws -> String? {
+        guard !Thread.isMainThread else { return nil }
+        switch path {
+        case "/Users/dev/.claude.json":
+            return #"{"oauthAccount":{"accountUuid":"CLAUDE-ID"}}"#
+        case "/Users/dev/.codex-background/auth.json":
+            return #"{"tokens":{"access_token":"token","account_id":"workspace-1"}}"#
+        default:
+            return nil
+        }
+    }
+
+    func readText(_ path: String) throws -> String {
+        throw CocoaError(.fileReadNoSuchFile)
+    }
+
+    func writeText(_ path: String, _ text: String) throws {}
+    func remove(_ path: String) throws {}
 }
