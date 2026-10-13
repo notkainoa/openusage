@@ -422,9 +422,7 @@ actor ClaudeLogUsageScanner {
 
     // MARK: - Line parsing
 
-    static let tailParser = JSONLTailParser<Entry>(parseChunk: { chunk, _ in
-        (items: parseFile(chunk), state: nil)
-    })
+    static let tailParser = JSONLTailParser<Entry>.stateless { parseFile($0) }
 
     /// Parse every usage line of one session file. Entries keep their raw timestamps — the date
     /// window is applied at aggregation so a cached parse stays valid as the window slides.

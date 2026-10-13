@@ -42,6 +42,66 @@ final class JSONLTailParsingTests: XCTestCase {
         }
     }
 
+    func testStatefulFullParseMatchesStreamedCodexAcrossMultipleBatches() async throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("multi-batch.jsonl")
+        var record = Data(
+            #"{"type":"event_msg","timestamp":"2025-01-01T00:00:00Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":1,"output_tokens":2}}}}"#.utf8
+        )
+        record.append(UInt8(ascii: "\n"))
+        var contents = Data()
+        for _ in 0..<20_000 {
+            contents.append(record)
+        }
+        try contents.write(to: fileURL)
+        XCTAssertGreaterThan(contents.count, JSONLStreamingReader.readChunkBytes * 4)
+        let file = try discover(fileURL)
+
+        let streamedStrategy = JSONLParseStrategy<CodexLogUsageScanner.Event>.streamed { discovered in
+            do {
+                let streamed: JSONLStreamingReader.Result<
+                    CodexLogUsageScanner.Event,
+                    CodexLogFileParser.ParseState
+                > = try JSONLStreamingReader.read(
+                    path: discovered.path,
+                    initialState: CodexLogFileParser.ParseState(),
+                    parse: { chunk, state in
+                        var parser = CodexLogFileParser(state: state)
+                        let events = parser.parse(chunk)
+                        state = parser.state
+                        return events
+                    }
+                )
+                guard let events = streamed.items else {
+                    return JSONLParseResult(outcome: .skipped, oversizedRecordCount: streamed.oversizedRecordCount)
+                }
+                return JSONLParseResult(
+                    outcome: .replaced(items: events, offset: nil, state: nil, fingerprint: nil),
+                    oversizedRecordCount: streamed.oversizedRecordCount
+                )
+            } catch {
+                return JSONLParseResult(outcome: .unreadable, oversizedRecordCount: 0)
+            }
+        }
+        let streamed = JSONLTailIO.parse(
+            request: JSONLParseRequest(file: file, resume: nil),
+            strategy: streamedStrategy
+        )
+        let tailed = JSONLTailIO.parse(
+            request: JSONLParseRequest(file: file, resume: nil),
+            strategy: .tail(CodexLogUsageScanner.tailParser)
+        )
+
+        guard case .replaced(let streamedEvents, _, _, _) = streamed.outcome,
+              case .replaced(let tailedEvents, _, _, _) = tailed.outcome
+        else {
+            return XCTFail("Expected both parsers to replace the full file parse")
+        }
+        XCTAssertEqual(tailedEvents, streamedEvents)
+        XCTAssertEqual(tailedEvents.count, 20_000)
+    }
+
     func testIncompleteAppendedLineIsRecoveredOnTheNextRefresh() async throws {
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -130,7 +190,7 @@ final class JSONLTailParsingTests: XCTestCase {
             tailParser: makeIntTailParser(stateRecorder: recorder)
         )
         XCTAssertEqual(result, [1, 2])
-        XCTAssertTrue(recorder.states.contains { $0 != nil })
+        XCTAssertTrue(recorder.states.contains { $0 > 0 })
     }
 
     func testCodexParseStateRoundTrip() throws {
@@ -170,34 +230,31 @@ final class JSONLTailParsingTests: XCTestCase {
     }
 
     private func makeIntTailParser(stateRecorder: StateRecorder? = nil) -> JSONLTailParser<Int> {
-        JSONLTailParser<Int> { chunk, stateData in
-            stateRecorder?.record(stateData)
-            var state = (try? stateData.map { try JSONDecoder().decode(IntState.self, from: $0) })
-                ?? IntState(count: 0)
+        JSONLTailParser<Int>.stateful(initial: IntState(count: 0)) { chunk, state in
+            stateRecorder?.record(state.count)
             let values = chunk.split(separator: UInt8(ascii: "\n")).compactMap {
                 Int(String(decoding: $0, as: UTF8.self))
             }
             state.count += values.count
-            guard let encoded = try? JSONEncoder().encode(state) else { return nil }
-            return (values, encoded)
+            return values
+        }
+    }
+
+    private final class StateRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var recordedStates: [Int] = []
+
+        var states: [Int] {
+            lock.withLock { recordedStates }
+        }
+
+        func record(_ state: Int) {
+            lock.withLock { recordedStates.append(state) }
         }
     }
 
     private struct IntState: Codable, Sendable {
         var count: Int
-    }
-
-    private final class StateRecorder: @unchecked Sendable {
-        private let lock = NSLock()
-        private var recordedStates: [Data?] = []
-
-        var states: [Data?] {
-            lock.withLock { recordedStates }
-        }
-
-        func record(_ state: Data?) {
-            lock.withLock { recordedStates.append(state) }
-        }
     }
 
     private func makeDirectory() throws -> URL {

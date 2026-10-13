@@ -3,12 +3,63 @@ import Foundation
 /// A resumable parser for append-only JSONL files. The scanner passes the parser only complete
 /// records and stores the opaque state returned after each successful scan.
 struct JSONLTailParser<Item: Codable & Sendable>: Sendable {
-    var parseChunk: @Sendable (_ chunk: Data, _ state: Data?) -> (items: [Item], state: Data?)?
+    let read: @Sendable (
+        _ path: String,
+        _ start: Int,
+        _ upTo: Int?,
+        _ state: Data?
+    ) throws -> JSONLStreamingReader.Result<Item, Data?>?
 
-    init(
-        parseChunk: @escaping @Sendable (_ chunk: Data, _ state: Data?) -> (items: [Item], state: Data?)?
-    ) {
-        self.parseChunk = parseChunk
+    static func stateful<State: Codable & Sendable>(
+        initial: State,
+        parse: @escaping @Sendable (Data, inout State) -> [Item]?
+    ) -> Self {
+        Self(read: { path, start, upTo, encodedState in
+            var initialState = initial
+            if let encodedState {
+                guard let decoded = try? JSONDecoder().decode(State.self, from: encodedState) else {
+                    return nil
+                }
+                initialState = decoded
+            }
+            let result: JSONLStreamingReader.Result<Item, State> = try JSONLStreamingReader.read(
+                path: path,
+                startingAt: start,
+                upTo: upTo,
+                initialState: initialState,
+                parse: parse
+            )
+            let state = try JSONEncoder().encode(result.state)
+            return JSONLStreamingReader.Result(
+                items: result.items,
+                state: state,
+                oversizedRecordCount: result.oversizedRecordCount,
+                parsedOffset: result.parsedOffset,
+                endsAtLineBoundary: result.endsAtLineBoundary
+            )
+        })
+    }
+
+    static func stateless(
+        _ parse: @escaping @Sendable (Data) -> [Item]?
+    ) -> Self {
+        Self(read: { path, start, upTo, _ in
+            let result: JSONLStreamingReader.Result<Item, JSONLStatelessParserState> =
+                try JSONLStreamingReader.read(
+                    path: path,
+                    startingAt: start,
+                    upTo: upTo,
+                    initialState: JSONLStatelessParserState(),
+                    parse: { chunk, _ in parse(chunk) }
+                )
+            return JSONLStreamingReader.Result(
+                items: result.items,
+                state: nil,
+                oversizedRecordCount: result.oversizedRecordCount,
+                parsedOffset: result.parsedOffset,
+                endsAtLineBoundary: result.endsAtLineBoundary
+            )
+        })
     }
 }
 
@@ -67,15 +118,9 @@ enum JSONLTailIO {
         parser: JSONLTailParser<Item>
     ) -> JSONLParseResult<Item> {
         do {
-            let streamed: JSONLStreamingReader.Result<Item, Data?> = try JSONLStreamingReader.read(
-                path: file.path,
-                initialState: Data?.none,
-                parse: { chunk, state in
-                    guard let parsed = parser.parseChunk(chunk, state) else { return nil }
-                    state = parsed.state
-                    return parsed.items
-                }
-            )
+            guard let streamed = try parser.read(file.path, 0, nil, nil) else {
+                return JSONLParseResult(outcome: .unreadable, oversizedRecordCount: 0)
+            }
             guard let items = streamed.items else {
                 return JSONLParseResult(outcome: .skipped, oversizedRecordCount: streamed.oversizedRecordCount)
             }
@@ -121,17 +166,9 @@ enum JSONLTailIO {
         else { return nil }
 
         do {
-            let streamed: JSONLStreamingReader.Result<Item, Data?> = try JSONLStreamingReader.read(
-                path: file.path,
-                startingAt: resume.offset,
-                upTo: file.size,
-                initialState: resume.state,
-                parse: { chunk, state in
-                    guard let parsed = parser.parseChunk(chunk, state) else { return nil }
-                    state = parsed.state
-                    return parsed.items
-                }
-            )
+            guard let streamed = try parser.read(file.path, resume.offset, file.size, resume.state) else {
+                return nil
+            }
             guard let items = streamed.items,
                   streamed.endsAtLineBoundary,
                   streamed.parsedOffset == file.size,

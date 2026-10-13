@@ -201,22 +201,15 @@ actor CodexLogUsageScanner {
 
     // MARK: - File parsing
 
-    static let tailParser = JSONLTailParser<Event>(parseChunk: { chunk, stateData in
-        let parserState: CodexLogFileParser.ParseState
-        if let stateData {
-            guard let decoded = try? JSONDecoder().decode(
-                CodexLogFileParser.ParseState.self,
-                from: stateData
-            ) else { return nil }
-            parserState = decoded
-        } else {
-            parserState = CodexLogFileParser.ParseState()
+    static let tailParser = JSONLTailParser<Event>.stateful(
+        initial: CodexLogFileParser.ParseState(),
+        parse: { chunk, state in
+            var parser = CodexLogFileParser(state: state)
+            let events = parser.parse(chunk)
+            state = parser.state
+            return events
         }
-        var parser = CodexLogFileParser(state: parserState)
-        let events = parser.parse(chunk)
-        guard let encoded = try? JSONEncoder().encode(parser.state) else { return nil }
-        return (items: events, state: encoded)
-    })
+    )
 
     /// Parse one rollout file: track the current model from `turn_context` and the current service
     /// tier from `thread_settings_applied`, normalize each `token_count` into a delta event, and
