@@ -19,7 +19,7 @@ struct ProviderAccountDiscoveryReadout: Sendable {
         let configuredHomes: Set<String>
         let codexHome: String?
         let buildsCards: Bool
-        let outcome: DefaultAccountObserver.Outcome?
+        let outcome: DefaultAccountObserver.Outcome
     }
 
     let claude: Claude?
@@ -145,7 +145,7 @@ extension ProviderAccountAssembly {
         let keychainIdentities = [keychainIdentity].compactMap { $0 }
         let knownIdentities = Set(homeIdentities + piIdentities + swapIdentities + keychainIdentities)
         let buildsCards = !swaps.isEmpty || hasEstablishedAccounts || knownIdentities.count > 1
-        let outcome = buildsCards ? nil : observer.observeCodex()
+        let outcome = observer.observeCodex()
         return ProviderAccountDiscoveryReadout.Codex(
             homeDirectory: homeDirectory, swaps: swaps, managedHomes: managedHomes,
             homeLogins: homeLogins, canonicalHomesByPath: canonicalHomesByPath,

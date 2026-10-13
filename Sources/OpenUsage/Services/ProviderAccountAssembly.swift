@@ -120,7 +120,7 @@ struct ProviderAccountAssembly {
 
         let outcomes: [(family: String, outcome: DefaultAccountObserver.Outcome)] = [
             ("claude", readout.claude?.outcome),
-            ("codex", readout.codex?.outcome),
+            ("codex", codexCards.isEmpty ? readout.codex?.outcome : nil),
         ].compactMap { family, outcome in
             outcome.map { (family, $0) }
         }
