@@ -51,11 +51,15 @@ struct ProviderAccountAssembly {
         if families.count < ProviderAccountID.families.count {
             AppLog.info(.config, "account identity read skipped for \(ProviderAccountID.families.subtracting(families).sorted().joined(separator: ", ")): login shell cold and no shell-environment snapshot exists yet")
         }
-        return await make(
+        let assemblyStartedAt = ProcessInfo.processInfo.systemUptime
+        let assembly = await make(
             observer: DefaultAccountObserver(),
             accountsStore: ProviderAccountsStore(defaults: defaults),
             families: families
         )
+        let assemblyDurationMS = Int((ProcessInfo.processInfo.systemUptime - assemblyStartedAt) * 1_000)
+        AppLog.info(.config, "account assembly duration: \(assemblyDurationMS) ms")
+        return assembly
     }
 
     /// The environment variable that relocates each family's default home — the fact whose
